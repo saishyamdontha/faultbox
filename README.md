@@ -11,6 +11,7 @@ and what the isolation costs per call.
 - Without isolation, 2 of 3 test plugins crash or silently corrupt the host. With fork+seccomp or MPK isolation, the host survives 100% of injected faults with its state intact.
 - MPK isolation adds **~21 ns per call**, about **4,500x cheaper** than fork+seccomp process isolation (24 ns vs 109 µs).
 - A naive MPK implementation costs 313 ns per call. **~92% of that is signal-mask bookkeeping** in `sigsetjmp`, not the protection-key switch itself. Removing it safely (`SA_NODEFER` + mask-free `sigsetjmp`) brings the cost down to 24 ns.
+- MPK alone does not stop a hostile plugin: a plugin that executes `WRPKRU` corrupts the host in both MPK modes. A load-time scanner (`mpk_safe`) rejected that plugin while still loading the 3 benign or buggy plugins (0 false positives).
 
 ---
 
@@ -24,13 +25,12 @@ and what the isolation costs per call.
 |---|---|---|
 | Crash | `nullderef.so` (null pointer dereference) | Host process killed (SIGSEGV) |
 | Memory corruption | `oob_write.so` (writes into `host_state`) | Host keeps running with **silently corrupted** state |
+| Malicious bypass | `wrpkru_attack.so` (executes `WRPKRU` to unlock all keys, then writes `host_state`) | Host state corrupted, even under MPK |
 | Control | `good.so` | Correct result |
 
 **In scope:** buggy plugins, i.e. accidental memory-safety faults.
 
-**Out of scope (see Limitations):** deliberately malicious plugins. In the MPK modes, a malicious
-plugin can execute `WRPKRU` and re-enable access to protected memory. This project demonstrates
-*fault* isolation, not a security sandbox.
+**Partially in scope:** malicious plugins that use `WRPKRU` to re-enable access to protected memory. The `wrpkru_attack` plugin demonstrates this bypass, and the `mpk_safe` mode blocks the direct form of it with a load-time scanner. The scanner is a first-line defense, not a complete one (see Limitations). This project demonstrates *fault* isolation, not a security sandbox.
 
 ---
 
@@ -42,6 +42,7 @@ plugin can execute `WRPKRU` and re-enable access to protected memory. This proje
 | `fork` | Child process per call, locked down with `seccomp` strict mode (only `read`, `write`, `exit`, `sigreturn`); result returned via pipe | Child dies; parent sees abnormal exit. Corruption lands in the child's copy-on-write memory |
 | `mpk` | `host_state` tagged with a protection key; access disabled (`pkey_set`) while the plugin runs, in the same process | SIGSEGV handler `siglongjmp`s back to the host, restores PKRU, then discards (`dlclose`) and reloads (`dlopen`) the plugin |
 | `mpk_fast` | Same as `mpk`, but `sigsetjmp(buf, 0)` (no signal-mask save) with an `SA_NODEFER` handler | Same as `mpk` |
+| `mpk_safe` | `mpk_fast` plus a load-time scan that rejects any plugin file containing the `WRPKRU` byte sequence (`0F 01 EF`) | Same as `mpk`; plugins containing `WRPKRU` are refused before loading |
 
 Implementation details worth noting:
 
@@ -56,12 +57,16 @@ Implementation details worth noting:
 
 ### Fault containment (`results/faults.csv`)
 
-| Mode | good | nullderef | oob_write |
-|---|---|---|---|
-| none | ok | **host crashed** (SIGSEGV) | **host state corrupted** |
-| fork | ok | fault contained | ok (write hit the child's private copy) |
-| mpk | ok | fault contained, plugin reloaded | fault contained, plugin reloaded |
-| mpk_fast | ok | fault contained, plugin reloaded | fault contained, plugin reloaded |
+| Mode | good | nullderef | oob_write | wrpkru_attack |
+|---|---|---|---|---|
+| none | ok | **host crashed** (SIGSEGV) | **host state corrupted** | **host state corrupted** |
+| fork | ok | fault contained | ok (write hit the child's private copy) | ok (write hit the child's private copy) |
+| mpk | ok | fault contained, plugin reloaded | fault contained, plugin reloaded | **host state corrupted** (bypass) |
+| mpk_fast | ok | fault contained, plugin reloaded | fault contained, plugin reloaded | **host state corrupted** (bypass) |
+| mpk_safe | ok | fault contained, plugin reloaded | fault contained, plugin reloaded | rejected at load (`WRPKRU` found) |
+
+Process isolation is unaffected by the attack: PKRU plays no role there, and the write lands in the
+child's copy-on-write memory.
 
 ### Performance (`results/bench.csv`, mean of 5 runs)
 
@@ -88,7 +93,7 @@ Methodology:
 
 ## Limitations
 
-- **Not secure against malicious plugins:** a plugin can execute `WRPKRU` (or call `pkey_set`) to re-enable access. Mitigations used in research systems include binary inspection for `WRPKRU`, call gates, and syscall filtering; none are implemented here.
+- **The WRPKRU defense is partial.** `mpk_safe` only scans the plugin file itself. It does not stop a plugin from calling glibc's `pkey_set()` (the instruction then lives in libc, and the plugin can simply try every key), `XRSTOR` (which can also load PKRU), or code generated at runtime. It may also reject benign files where the bytes `0F 01 EF` occur by chance. Research systems add call gates, restrictions on executable memory, and syscall filtering on top.
 - **Only one page is protected.** The rest of host memory (heap, stack, globals) remains accessible to the plugin in MPK modes.
 - **No syscall restriction in MPK modes:** plugins can call any syscall (only `fork` mode uses seccomp).
 - **Single-threaded:** PKRU is per-thread, and the recovery state (`sigjmp_buf`, flags) is global.
@@ -125,7 +130,7 @@ src/isolation.c/h  the four isolation modes and MPK fault handling
 src/host.c         runs one plugin call under a chosen mode and reports the outcome
 src/bench.c        per-call overhead and fault-recovery benchmark
 src/mpk_spike.c    minimal standalone MPK fault-and-recover demo
-plugins/           good.c, nullderef.c, oob_write.c
+plugins/           good.c, nullderef.c, oob_write.c, wrpkru_attack.c
 scripts/           build.sh, run_faults.sh, run_bench.sh
 results/           faults.csv, bench.csv
 ~~~
