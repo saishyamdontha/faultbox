@@ -20,7 +20,7 @@ nine cases. Plain MPK isolation manages six, and a hardened variant with a secco
 a `WRPKRU` scanner manages eight. The clearest advantage of in-process isolation is recovery:
 restoring the plugin's memory from a snapshot takes 1.5 µs, about 80x faster than respawning a
 worker. Per call, MPK adds about 21 ns, about half the overhead of the fastest process boundary
-measured (40 ns), which in turn occupies a dedicated core. A naive MPK implementation costs 301 ns
+measured (42 ns), which in turn occupies a dedicated core. A naive MPK implementation costs 313 ns
 per call, about 92% of it from one signal-mask syscall per call.
 
 ## 1. Motivation
@@ -78,7 +78,7 @@ Key implementation details:
 - **Snapshot recovery.** At load, the plugin's writable segments (excluding RELRO) are copied; after
   a fault they are copied back.
 - **Worker respawn.** A new `ipc_shm` worker signals readiness before the host spins. Without this,
-  the worker starved on the host's core and recovery took about 3 ms instead of 119 µs.
+  the worker starved on the host's core and recovery took about 3 ms instead of 121 µs.
 
 ## 4. Evaluation setup
 
@@ -87,7 +87,7 @@ profile, on AC power. Containment: each (mode, plugin) pair in a fresh process, 
 exit status and checks of both memory regions. Per-call cost: calls to `good` after 1,000 warm-up
 calls (1,000,000 calls for `none`, MPK modes and `ipc_shm`; 100,000 for `ipc`; 10,000 for `fork`).
 Recovery: mean over 1,000 crashing calls, including the recovery step. Pinned to CPU 2 (`ipc_shm`:
-CPUs 2 and 4, separate physical cores). 5 repetitions, means reported.
+CPUs 2 and 4, separate physical cores). 5 repetitions, means reported; a second independent 5-run batch agreed within ~5%.
 
 ## 5. Results
 
@@ -111,13 +111,13 @@ survived because of the signal handler and the alternate stack.
 
 | Mode | Per call | Overhead | Fault + recovery |
 |---|---|---|---|
-| none | 2.6 ns | – | – |
-| mpk_hard | 23.3 ns | +20.7 ns | 1.5 µs |
-| mpk_fast | 23.7 ns | +21.1 ns | 29.2 µs |
-| mpk | 301 ns | +299 ns | 30.2 µs |
-| ipc_shm | 42.2 ns | +39.6 ns | 119.0 µs |
-| ipc | 5,394 ns | +5.4 µs | 117.5 µs |
-| fork | 106,883 ns | +107 µs | 107.4 µs |
+| none | 2.7 ns | – | – |
+| mpk_hard | 24.1 ns | +21.4 ns | 1.5 µs |
+| mpk_fast | 23.9 ns | +21.2 ns | 30.4 µs |
+| mpk | 313 ns | +310 ns | 31.3 µs |
+| ipc_shm | 44.2 ns | +41.5 ns | 120.8 µs |
+| ipc | 5,399 ns | +5.4 µs | 119.3 µs |
+| fork | 111,835 ns | +112 µs | 110.2 µs |
 
 ### 5.3 Recovery correctness
 
@@ -128,12 +128,12 @@ methods passed, and the control failed as expected.
 ## 6. Discussion
 
 **Recovery, not call speed, is the main advantage.** Against a well-engineered process boundary,
-MPK's per-call overhead is only about half (21 vs 40 ns), and the process boundary pays for its
+MPK's per-call overhead is only about half (21 vs 42 ns), and the process boundary pays for its
 speed with a permanently busy core. Recovery differs by nearly two orders of magnitude: 1.5 µs for a
-snapshot restore against about 118 µs for any worker respawn.
+snapshot restore against about 120 µs for any worker respawn.
 
 **Recovery design matters as much as the isolation mechanism.** With the same isolation and the
-same fault, reloading the plugin takes 29 µs and restoring a snapshot 1.5 µs.
+same fault, reloading the plugin takes 30 µs and restoring a snapshot 1.5 µs.
 
 **Bookkeeping can dominate.** About 92% of naive MPK overhead was one `rt_sigprocmask` syscall per
 call (101,000 calls under `strace`, against 0 for the optimised version).

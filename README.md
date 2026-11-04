@@ -14,14 +14,14 @@ AMD Ryzen 9 8940HX, performance power profile, means of 5 runs.
 
 - **Recovery is where in-process isolation wins.** `mpk_hard` recovers from a crashing plugin in
   **1.5 µs** by rewinding the plugin's memory from a load-time snapshot. That is ~80x faster than
-  respawning a sandboxed worker process (~118 µs) and ~20x faster than reloading the plugin (29 µs).
+  respawning a sandboxed worker process (~120 µs) and ~20x faster than reloading the plugin (30 µs).
 - **Per-call cost: a modest win against the best process baseline.** MPK adds ~21 ns per call. The
-  fastest process boundary measured, a shared-memory worker spinning on a second core, adds ~40 ns
-  (~1.9x more) and permanently occupies a CPU core. A pipe-based worker adds ~5.4 µs (~260x more).
+  fastest process boundary measured, a shared-memory worker spinning on a second core, adds ~42 ns
+  (~1.9x more) and permanently occupies a CPU core. A pipe-based worker adds ~5.4 µs (~250x more).
 - **Coverage.** Process isolation keeps the host intact against all 9 faulty or malicious plugins.
   Plain MPK isolation manages 6/9. Adding a seccomp-BPF exit gate and a `WRPKRU` scanner
   (`mpk_hard`) raises this to 8/9; writes to unprotected host memory remain uncontained.
-- **Where the cost hides.** Naive MPK costs 301 ns per call; ~92% of it is one `rt_sigprocmask`
+- **Where the cost hides.** Naive MPK costs 313 ns per call; ~92% of it is one `rt_sigprocmask`
   syscall per call from saving the signal mask (101,000 vs 0 calls under `strace`). Removing it
   safely gives 24 ns.
 
@@ -80,7 +80,7 @@ Implementation notes:
 - **Process modes:** workers are non-dumpable, exit with `syscall(SYS_exit)` (seccomp strict forbids
   `exit_group`), and die with the host (`PR_SET_PDEATHSIG`). The host ignores SIGPIPE. A respawned
   `ipc_shm` worker signals readiness before the host starts spinning; without this, the new worker
-  starved on the host's core and recovery took ~3 ms instead of ~119 µs.
+  starved on the host's core and recovery took ~3 ms instead of ~121 µs.
 
 ---
 
@@ -109,13 +109,13 @@ Implementation notes:
 
 | Mode | Per call | Overhead vs `none` | Fault + recovery | Recovery method |
 |---|---|---|---|---|
-| none | 2.6 ns | – | – | – |
-| mpk_hard | 23.3 ns | +20.7 ns | 1.5 µs | snapshot restore |
-| mpk_fast | 23.7 ns | +21.1 ns | 29.2 µs | plugin reload |
-| mpk | 301 ns | +299 ns | 30.2 µs | plugin reload |
-| ipc_shm | 42.2 ns | +39.6 ns | 119.0 µs | worker respawn (uses 2 cores) |
-| ipc | 5,394 ns | +5.4 µs | 117.5 µs | worker respawn |
-| fork | 106,883 ns | +107 µs | 107.4 µs | new process per call |
+| none | 2.7 ns | – | – | – |
+| mpk_hard | 24.1 ns | +21.4 ns | 1.5 µs | snapshot restore |
+| mpk_fast | 23.9 ns | +21.2 ns | 30.4 µs | plugin reload |
+| mpk | 313 ns | +310 ns | 31.3 µs | plugin reload |
+| ipc_shm | 44.2 ns | +41.5 ns | 120.8 µs | worker respawn (uses 2 cores) |
+| ipc | 5,399 ns | +5.4 µs | 119.3 µs | worker respawn |
+| fork | 111,835 ns | +112 µs | 110.2 µs | new process per call |
 
 Methodology:
 
@@ -123,7 +123,7 @@ Methodology:
   1,000,000 calls for `none`, MPK modes and `ipc_shm`; 100,000 for `ipc`; 10,000 for `fork`.
 - Fault + recovery: mean over 1,000 calls to `nullderef.so`, including the recovery step.
 - Pinned to CPU 2; `ipc_shm` uses CPUs 2 and 4 (separate physical cores). Performance power profile,
-  on AC power. 5 repetitions, means reported.
+  on AC power. 5 repetitions, means reported; a second independent 5-run batch agreed within ~5%.
 
 ### Recovery correctness (`results/state.csv`)
 
@@ -142,10 +142,10 @@ returns 1 again.
 1. **In-process isolation's clear win is recovery, not call speed.** Snapshot recovery (1.5 µs) is
    ~80x faster than respawning any process-based worker.
 2. **The recovery method matters as much as the isolation mechanism.** Same mode, same fault:
-   reload takes 29 µs, snapshot restore 1.5 µs.
+   reload takes 30 µs, snapshot restore 1.5 µs.
 3. **Against a well-engineered process boundary, MPK's per-call advantage is ~1.9x**, and the
    process version costs a permanently busy core. Against a conventional pipe-based worker it is
-   ~260x.
+   ~250x.
 4. **Most MPK "containment" comes from signal handling, not from MPK.** Only `oob_write` is stopped
    by the protection key itself (`SEGV_PKUERR`).
 5. **The domain switch is cheap; bookkeeping is not.** ~92% of naive MPK overhead was one
