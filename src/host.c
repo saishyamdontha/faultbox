@@ -39,15 +39,21 @@ static int host_main(int argc, char **argv) {
     if (!h) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 2; }
     plugin_fn run = (plugin_fn)dlsym(h, "plugin_run");
     if (!run) { fprintf(stderr, "dlsym: %s\n", dlerror()); return 2; }
+    if (iso_mode_hardens(mode)) iso_snapshot_take(h);
 
     int out = 0;
     int rc = call(run, 21, &out);
 
     int recovered = 0;
     if (rc != CALL_OK && iso_is_mpk(call)) {
-        dlclose(h);                     /* discard faulted plugin */
-        h = dlopen(path, RTLD_NOW);     /* load a fresh instance */
-        recovered = (h != NULL);
+        if (iso_mode_hardens(mode)) {
+            iso_snapshot_restore();         /* rewind plugin memory to load time */
+            recovered = 1;
+        } else {
+            dlclose(h);                     /* discard faulted plugin */
+            h = dlopen(path, RTLD_NOW);     /* load a fresh instance */
+            recovered = (h != NULL);
+        }
     } else if (rc != CALL_OK) {
         recovered = 1;                  /* fork/ipc: a fresh process takes over */
     }

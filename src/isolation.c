@@ -13,6 +13,8 @@
 #include <linux/audit.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <dlfcn.h>
+#include <link.h>
 #include <unistd.h>
 #include "isolation.h"
 
@@ -317,4 +319,66 @@ void iso_exit(int code) {
     fflush(NULL);
     if (exit_filter_on) iso_raw_exit_group(code);
     exit(code);
+}
+
+/* ---------- Snapshot recovery ----------
+   At load: copy the plugin's writable segments (.data/.bss), skipping the
+   RELRO part that becomes read-only after relocation. After a fault: copy
+   them back. Not covered: plugin heap allocations, plugin mmaps, TLS. */
+#define SNAP_MAX 8
+static struct { char *addr; size_t len; char *copy; } snap[SNAP_MAX];
+static int snap_n = 0;
+static ElfW(Addr) snap_base = 0;
+
+static int snap_cb(struct dl_phdr_info *info, size_t size, void *data) {
+    (void)size; (void)data;
+    if (info->dlpi_addr != snap_base) return 0;          /* not our plugin */
+
+    ElfW(Addr) relro_lo = 0, relro_hi = 0;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        if (ph->p_type == PT_GNU_RELRO) {
+            relro_lo = info->dlpi_addr + ph->p_vaddr;
+            relro_hi = relro_lo + ph->p_memsz;
+        }
+    }
+    for (int i = 0; i < info->dlpi_phnum && snap_n < SNAP_MAX; i++) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_LOAD || !(ph->p_flags & PF_W)) continue;
+        ElfW(Addr) lo = info->dlpi_addr + ph->p_vaddr;
+        ElfW(Addr) hi = lo + ph->p_memsz;
+        if (relro_hi > lo && relro_lo < hi) {             /* overlaps RELRO */
+            if (relro_lo <= lo) lo = relro_hi;            /* RELRO at the start */
+            else hi = relro_lo;                           /* RELRO at the end */
+        }
+        if (lo >= hi) continue;
+        size_t len = hi - lo;
+        char *copy = malloc(len);
+        if (!copy) { perror("malloc"); exit(2); }
+        memcpy(copy, (char *)lo, len);
+        snap[snap_n].addr = (char *)lo;
+        snap[snap_n].len = len;
+        snap[snap_n].copy = copy;
+        snap_n++;
+    }
+    return 1;                                              /* found it: stop */
+}
+
+void iso_snapshot_free(void) {
+    for (int i = 0; i < snap_n; i++) free(snap[i].copy);
+    snap_n = 0;
+}
+
+int iso_snapshot_take(void *handle) {
+    iso_snapshot_free();
+    struct link_map *lm = NULL;
+    if (dlinfo(handle, RTLD_DI_LINKMAP, &lm) != 0 || !lm) return -1;
+    snap_base = lm->l_addr;
+    dl_iterate_phdr(snap_cb, NULL);
+    return snap_n;                                         /* number of regions saved */
+}
+
+void iso_snapshot_restore(void) {
+    for (int i = 0; i < snap_n; i++)
+        memcpy(snap[i].addr, snap[i].copy, snap[i].len);
 }

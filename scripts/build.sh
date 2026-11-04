@@ -8,4 +8,5 @@ for src in plugins/*.c; do
 done
 gcc -O2 -g -Wall -Wextra -Isrc -rdynamic -o build/host  src/host.c  src/isolation.c -ldl
 gcc -O2 -g -Wall -Wextra -Isrc -rdynamic -o build/bench src/bench.c src/isolation.c -ldl
+gcc -O2 -g -Wall -Wextra -Isrc -rdynamic -o build/state_test src/state_test.c src/isolation.c -ldl
 echo "build ok"

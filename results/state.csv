@@ -1,0 +1,5 @@
+mode,recovery,first_call,fault,after_recovery,result
+mpk_fast,skip,1,fault,12346,FAIL
+mpk_fast,reload,1,fault,1,PASS
+mpk_fast,snapshot,1,fault,1,PASS
+mpk_hard,snapshot,1,fault,1,PASS

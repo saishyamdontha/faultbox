@@ -24,4 +24,8 @@ void iso_harden(void);
 int iso_mode_hardens(const char *mode);
 __attribute__((noreturn)) void iso_exit(int code);
 
+int iso_snapshot_take(void *handle);
+void iso_snapshot_restore(void);
+void iso_snapshot_free(void);
+
 #endif

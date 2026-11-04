@@ -59,12 +59,14 @@ static int host_main(int argc, char **argv) {
     /* 2. Fault + recovery latency (crashing plugin); skipped for none */
     if (call != run_none && trials > 0) {
         h = load("build/nullderef.so", &run);
+        if (iso_mode_hardens(mode)) iso_snapshot_take(h);
         double total = 0;
         for (long t = 0; t < trials; t++) {
             double a = now_ns();
             int rc = call(run, 0, &out);
             if (rc != CALL_PLUGIN_FAULT) { fprintf(stderr, "expected fault\n"); return 2; }
-            if (iso_is_mpk(call)) { dlclose(h); h = load("build/nullderef.so", &run); }
+            if (iso_mode_hardens(mode)) iso_snapshot_restore();
+            else if (iso_is_mpk(call)) { dlclose(h); h = load("build/nullderef.so", &run); }
             total += now_ns() - a;
         }
         printf("%s,fault_recovery_us,%.2f\n", mode, total / trials / 1000.0);
