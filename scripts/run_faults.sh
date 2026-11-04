@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -u
 cd "$(dirname "$0")/.."
+mkdir -p results
 modes="${*:-none fork mpk}"
 out=results/faults.csv
 echo "mode,plugin,exit_code,outcome" > "$out"

@@ -1,0 +1,10 @@
+mode,plugin,exit_code,outcome
+none,good,0,ok
+none,nullderef,139,host_crashed_sigsegv
+none,oob_write,3,host_state_corrupted
+fork,good,0,ok
+fork,nullderef,4,plugin_fault_contained
+fork,oob_write,0,ok
+mpk,good,0,ok
+mpk,nullderef,4,plugin_fault_contained
+mpk,oob_write,4,plugin_fault_contained
