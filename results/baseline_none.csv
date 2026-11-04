@@ -1,0 +1,4 @@
+mode,plugin,exit_code,outcome
+none,good,0,ok
+none,nullderef,139,host_crashed_sigsegv
+none,oob_write,3,host_state_corrupted
