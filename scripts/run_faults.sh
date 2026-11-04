@@ -2,7 +2,7 @@
 set -u
 cd "$(dirname "$0")/.."
 mkdir -p results
-modes="${*:-none fork ipc mpk mpk_fast mpk_scan}"
+modes="${*:-none fork ipc mpk mpk_fast mpk_hard}"
 plugins="good nullderef oob_write corrupt_unprotected divzero illegal abort_call stack_overflow exit_call wrpkru_attack"
 out=results/faults.csv
 echo "mode,plugin,exit_code,outcome" > "$out"

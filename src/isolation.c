@@ -9,6 +9,10 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <linux/seccomp.h>
+#include <linux/filter.h>
+#include <linux/audit.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <unistd.h>
 #include "isolation.h"
 
@@ -156,7 +160,7 @@ void mpk_setup(char *protected_page, long pagesz) {
     sa.sa_sigaction = mpk_fault_handler;
     sa.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK;
     sigemptyset(&sa.sa_mask);
-    int sigs[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT };
+    int sigs[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT, SIGSYS };
     for (size_t i = 0; i < sizeof sigs / sizeof sigs[0]; i++)
         sigaction(sigs[i], &sa, NULL);
 }
@@ -214,7 +218,7 @@ iso_call_fn iso_by_name(const char *mode) {
     if (strcmp(mode, "ipc") == 0)      return run_ipc;
     if (strcmp(mode, "mpk") == 0)      return run_mpk;
     if (strcmp(mode, "mpk_fast") == 0) return run_mpk_fast;
-    if (strcmp(mode, "mpk_scan") == 0) return run_mpk_fast;
+    if (strcmp(mode, "mpk_hard") == 0) return run_mpk_fast;
     return NULL;
 }
 
@@ -223,7 +227,7 @@ int iso_is_mpk(iso_call_fn call) {
 }
 
 int iso_mode_scans(const char *mode) {
-    return strcmp(mode, "mpk_scan") == 0;
+    return strcmp(mode, "mpk_hard") == 0;
 }
 
 const char *iso_last_fault(void) {
@@ -236,6 +240,7 @@ const char *iso_last_fault(void) {
         case SIGFPE:  s = "SIGFPE";  break;
         case SIGILL:  s = "SIGILL";  break;
         case SIGABRT: s = "SIGABRT"; break;
+        case SIGSYS:  s = "SIGSYS";  break;
         case SIGKILL: s = "SIGKILL"; break;
         default:      s = "SIG?";    break;
     }
@@ -247,4 +252,69 @@ const char *iso_last_fault(void) {
         return buf;
     }
     return s;
+}
+
+/* ---------- mpk_hard: seccomp exit gate ----------
+   Seccomp filters are permanent, so instead of toggling a filter around
+   plugin calls, exit/exit_group are blocked for the whole process EXCEPT
+   when issued from one instruction in the host (the exit gate). A plugin
+   calling exit() gets SIGSYS, which the MPK handler treats as a fault.
+
+   The gate is written in top-level assembly so the compiler can never
+   duplicate or move it: exactly one syscall instruction, at a known address. */
+__asm__(
+    ".text\n"
+    ".globl iso_raw_exit_group\n"
+    ".type iso_raw_exit_group, @function\n"
+    "iso_raw_exit_group:\n"
+    "    mov $231, %eax\n"          /* __NR_exit_group on x86-64; code is in %edi */
+    "    syscall\n"
+    ".globl iso_exit_gate\n"
+    "iso_exit_gate:\n"              /* seccomp sees the address AFTER syscall */
+    "    hlt\n"
+    ".size iso_raw_exit_group, .-iso_raw_exit_group\n"
+);
+__attribute__((noreturn)) void iso_raw_exit_group(int code);
+extern char iso_exit_gate[];
+
+static int exit_filter_on = 0;
+
+void iso_harden(void) {
+    uint64_t gate = (uint64_t)(uintptr_t)iso_exit_gate;
+    uint32_t lo = (uint32_t)gate, hi = (uint32_t)(gate >> 32);
+
+    struct sock_filter f[] = {
+        /* 0  */ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
+        /* 1  */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 1, 0),
+        /* 2  */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
+        /* 3  */ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+        /* 4  */ BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0x40000000, 8, 0),       /* x32 ABI -> trap */
+        /* 5  */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_exit_group, 2, 0),
+        /* 6  */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_exit, 1, 0),
+        /* 7  */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+        /* exit / exit_group: allow only from the host's exit gate */
+        /* 8  */ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, instruction_pointer)),
+        /* 9  */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, lo, 0, 3),
+        /* 10 */ BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, instruction_pointer) + 4),
+        /* 11 */ BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, hi, 0, 1),
+        /* 12 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+        /* 13 */ BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP),
+    };
+    struct sock_fprog prog = { .len = sizeof f / sizeof f[0], .filter = f };
+
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) { perror("no_new_privs"); exit(2); }
+    if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) { perror("seccomp"); exit(2); }
+    exit_filter_on = 1;
+}
+
+int iso_mode_hardens(const char *mode) {
+    return strcmp(mode, "mpk_hard") == 0;
+}
+
+/* All host exits go through here. With the filter on, libc's exit path is
+   blocked, so flush stdio and leave through the gate. */
+void iso_exit(int code) {
+    fflush(NULL);
+    if (exit_filter_on) iso_raw_exit_group(code);
+    exit(code);
 }

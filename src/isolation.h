@@ -20,4 +20,8 @@ int iso_mode_scans(const char *mode);
 long iso_scan_wrpkru(const char *path);
 const char *iso_last_fault(void);
 
+void iso_harden(void);
+int iso_mode_hardens(const char *mode);
+__attribute__((noreturn)) void iso_exit(int code);
+
 #endif

@@ -9,9 +9,9 @@
 char *host_state = NULL;                /* protected page in MPK modes */
 char host_config[64] = HOST_CONFIG_OK;  /* ordinary global, never protected */
 
-int main(int argc, char **argv) {
+static int host_main(int argc, char **argv) {
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <none|fork|ipc|mpk|mpk_fast|mpk_scan> <plugin.so>\n", argv[0]);
+        fprintf(stderr, "usage: %s <none|fork|ipc|mpk|mpk_fast|mpk_hard> <plugin.so>\n", argv[0]);
         return 2;
     }
     const char *mode = argv[1], *path = argv[2];
@@ -24,6 +24,7 @@ int main(int argc, char **argv) {
     if (host_state == MAP_FAILED) { perror("mmap"); return 2; }
     strcpy(host_state, HOST_STATE_OK);
     if (iso_is_mpk(call)) mpk_setup(host_state, pagesz);
+    if (iso_mode_hardens(mode)) iso_harden();
 
     if (iso_mode_scans(mode)) {
         long hits = iso_scan_wrpkru(path);
@@ -64,4 +65,8 @@ int main(int argc, char **argv) {
     if (!state_ok || !config_ok) return 3;
     if (rc != CALL_OK) return 4;
     return 0;
+}
+
+int main(int argc, char **argv) {
+    iso_exit(host_main(argc, argv));
 }

@@ -25,7 +25,7 @@ static void *load(const char *path, plugin_fn *run) {
     return h;
 }
 
-int main(int argc, char **argv) {
+static int host_main(int argc, char **argv) {
     if (argc != 4) {
         fprintf(stderr, "usage: %s <none|fork|ipc|mpk|mpk_fast> <calls> <fault_trials>\n", argv[0]);
         return 2;
@@ -41,6 +41,7 @@ int main(int argc, char **argv) {
     if (host_state == MAP_FAILED) { perror("mmap"); return 2; }
     strcpy(host_state, HOST_STATE_OK);
     if (iso_is_mpk(call)) mpk_setup(host_state, pagesz);
+    if (iso_mode_hardens(mode)) iso_harden();
 
     /* 1. Per-call overhead (well-behaved plugin) */
     plugin_fn run;
@@ -77,4 +78,8 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, "checksum=%ld\n", sum);   /* keeps the compiler from discarding the loop */
     return 0;
+}
+
+int main(int argc, char **argv) {
+    iso_exit(host_main(argc, argv));
 }
