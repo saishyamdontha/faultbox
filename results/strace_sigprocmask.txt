@@ -1,0 +1,12 @@
+# strace -c -e trace=rt_sigprocmask, 100000 calls + 1000 warm-up
+## mpk
+checksum=10000899000
+mpk,call_ns,16169.9
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.251584           2    101000           rt_sigprocmask
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.251584           2    101000           total
+## mpk_fast
+checksum=10000899000
+mpk_fast,call_ns,23.4
