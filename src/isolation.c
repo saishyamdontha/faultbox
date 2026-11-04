@@ -389,7 +389,7 @@ void iso_snapshot_restore(void) {
    Fastest realistic process boundary: no syscalls per call. Host and worker
    spin on a shared-memory channel on two different cores. The worker stays
    under seccomp strict (spinning needs no syscalls). Cost: one core burned. */
-struct shm_chan { int req_seq; int in; int resp_seq; int out; };
+struct shm_chan { int req_seq; int in; int resp_seq; int out; int ready; };
 static struct shm_chan *shm = NULL;
 static pid_t shm_pid = -1;
 static volatile sig_atomic_t shm_child_died = 0;
@@ -441,6 +441,7 @@ static void shm_start(plugin_fn run) {
         prctl(PR_SET_PDEATHSIG, SIGKILL);       /* never outlive the host */
         if (shm_have_two) pin_to(shm_worker_cpu);
         sandbox_child();
+        __atomic_store_n(&shm->ready, 1, __ATOMIC_RELEASE);   /* pinned + sandboxed */
         int last = 0;
         for (;;) {
             int seq;
@@ -452,6 +453,10 @@ static void shm_start(plugin_fn run) {
         }
     }
     if (shm_have_two) pin_to(shm_host_cpu);
+    while (!__atomic_load_n(&shm->ready, __ATOMIC_ACQUIRE)) {   /* let the new worker run */
+        if (shm_child_died) break;
+        sched_yield();
+    }
     shm_pid = pid;
 }
 
