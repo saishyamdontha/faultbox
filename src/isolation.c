@@ -98,6 +98,7 @@ iso_call_fn iso_by_name(const char *mode) {
     if (strcmp(mode, "fork") == 0) return run_fork;
     if (strcmp(mode, "mpk") == 0)  return run_mpk;
     if (strcmp(mode, "mpk_fast") == 0) return run_mpk_fast;
+    if (strcmp(mode, "mpk_safe") == 0) return run_mpk_fast;
     return NULL;
 }
 
@@ -132,4 +133,25 @@ int run_mpk_fast(plugin_fn run, int in, int *out) {
 
 int iso_is_mpk(iso_call_fn call) {
     return call == run_mpk || call == run_mpk_fast;
+}
+
+/* ---------- Load-time defense: reject plugins containing WRPKRU ----------
+   Scans the whole .so for the byte sequence 0F 01 EF. Conservative: it may
+   reject benign files where the bytes appear by chance, and it does not
+   cover XRSTOR or code generated at runtime. */
+long iso_scan_wrpkru(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    long hits = 0;
+    int a = -1, b = -1, c;
+    while ((c = fgetc(f)) != EOF) {
+        if (a == 0x0f && b == 0x01 && c == 0xef) hits++;
+        a = b; b = c;
+    }
+    fclose(f);
+    return hits;
+}
+
+int iso_mode_scans(const char *mode) {
+    return strcmp(mode, "mpk_safe") == 0;
 }

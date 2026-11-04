@@ -23,6 +23,14 @@ int main(int argc, char **argv) {
     if (host_state == MAP_FAILED) { perror("mmap"); return 2; }
     strcpy(host_state, HOST_STATE_OK);
     if (iso_is_mpk(call)) mpk_setup(host_state, pagesz);
+    if (iso_mode_scans(mode)) {
+        long hits = iso_scan_wrpkru(path);
+        if (hits != 0) {
+            printf("mode=%s plugin=%s call=rejected reason=wrpkru_found hits=%ld host_state=INTACT\n",
+                   mode, path, hits);
+            return 5;
+        }
+    }
 
     void *h = dlopen(path, RTLD_NOW);
     if (!h) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 2; }

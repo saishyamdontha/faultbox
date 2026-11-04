@@ -16,4 +16,7 @@ iso_call_fn iso_by_name(const char *mode);
 int iso_last_fault_code(void);
 const char *iso_fault_name(int code);
 
+long iso_scan_wrpkru(const char *path);
+int iso_mode_scans(const char *mode);
+
 #endif

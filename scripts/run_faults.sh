@@ -2,17 +2,18 @@
 set -u
 cd "$(dirname "$0")/.."
 mkdir -p results
-modes="${*:-none fork mpk mpk_fast}"
+modes="${*:-none fork mpk mpk_fast mpk_safe}"
 out=results/faults.csv
 echo "mode,plugin,exit_code,outcome" > "$out"
 for m in $modes; do
-  for p in good nullderef oob_write; do
+  for p in good nullderef oob_write wrpkru_attack; do
     ./build/host "$m" build/$p.so > /dev/null 2>&1
     code=$?
     case $code in
       0)   outcome=ok ;;
       3)   outcome=host_state_corrupted ;;
       4)   outcome=plugin_fault_contained ;;
+      5)   outcome=rejected_at_load ;;
       139) outcome=host_crashed_sigsegv ;;
       *)   outcome=other_$code ;;
     esac
