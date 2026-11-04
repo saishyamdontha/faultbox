@@ -6,11 +6,12 @@
 #include <unistd.h>
 #include "isolation.h"
 
-char *host_state = NULL;
+char *host_state = NULL;                /* protected page in MPK modes */
+char host_config[64] = HOST_CONFIG_OK;  /* ordinary global, never protected */
 
 int main(int argc, char **argv) {
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <none|fork|mpk> <plugin.so>\n", argv[0]);
+        fprintf(stderr, "usage: %s <none|fork|ipc|mpk|mpk_fast|mpk_scan> <plugin.so>\n", argv[0]);
         return 2;
     }
     const char *mode = argv[1], *path = argv[2];
@@ -23,10 +24,11 @@ int main(int argc, char **argv) {
     if (host_state == MAP_FAILED) { perror("mmap"); return 2; }
     strcpy(host_state, HOST_STATE_OK);
     if (iso_is_mpk(call)) mpk_setup(host_state, pagesz);
+
     if (iso_mode_scans(mode)) {
         long hits = iso_scan_wrpkru(path);
         if (hits != 0) {
-            printf("mode=%s plugin=%s call=rejected reason=wrpkru_found hits=%ld host_state=INTACT\n",
+            printf("mode=%s plugin=%s call=rejected reason=wrpkru_found hits=%ld\n",
                    mode, path, hits);
             return 5;
         }
@@ -42,19 +44,24 @@ int main(int argc, char **argv) {
 
     int recovered = 0;
     if (rc != CALL_OK && iso_is_mpk(call)) {
-        dlclose(h);                         /* discard faulted plugin */
-        h = dlopen(path, RTLD_NOW);         /* load a fresh instance */
+        dlclose(h);                     /* discard faulted plugin */
+        h = dlopen(path, RTLD_NOW);     /* load a fresh instance */
         recovered = (h != NULL);
+    } else if (rc != CALL_OK) {
+        recovered = 1;                  /* fork/ipc: a fresh process takes over */
     }
 
-    int intact = strcmp(host_state, HOST_STATE_OK) == 0;
-    printf("mode=%s plugin=%s call=%s fault=%s recovered=%s result=%d host_state=%s\n",
-           mode, path, rc == CALL_OK ? "ok" : "plugin_fault",
-           iso_fault_name(iso_last_fault_code()), recovered ? "yes" : "no",
-           out, intact ? "INTACT" : "CORRUPTED");
+    int state_ok  = strcmp(host_state, HOST_STATE_OK) == 0;
+    int config_ok = strcmp(host_config, HOST_CONFIG_OK) == 0;
+    printf("mode=%s plugin=%s call=%s fault=%s recovered=%s result=%d "
+           "host_state=%s host_config=%s\n",
+           mode, path, rc == CALL_OK ? "ok" : "plugin_fault", iso_last_fault(),
+           recovered ? "yes" : "no", out,
+           state_ok ? "INTACT" : "CORRUPTED", config_ok ? "INTACT" : "CORRUPTED");
     if (h) dlclose(h);
+    iso_reset();
 
-    if (!intact) return 3;
+    if (!state_ok || !config_ok) return 3;
     if (rc != CALL_OK) return 4;
     return 0;
 }

@@ -9,6 +9,7 @@
 #include "isolation.h"
 
 char *host_state = NULL;
+char host_config[64] = HOST_CONFIG_OK;
 
 static double now_ns(void) {
     struct timespec ts;
@@ -26,7 +27,7 @@ static void *load(const char *path, plugin_fn *run) {
 
 int main(int argc, char **argv) {
     if (argc != 4) {
-        fprintf(stderr, "usage: %s <none|fork|mpk> <calls> <fault_trials>\n", argv[0]);
+        fprintf(stderr, "usage: %s <none|fork|ipc|mpk|mpk_fast> <calls> <fault_trials>\n", argv[0]);
         return 2;
     }
     const char *mode = argv[1];
@@ -51,6 +52,7 @@ int main(int argc, char **argv) {
     for (long i = 0; i < calls; i++) { call(run, (int)i, &out); sum += out; }
     double t1 = now_ns();
     printf("%s,call_ns,%.1f\n", mode, (t1 - t0) / calls);
+    iso_reset();
     dlclose(h);
 
     /* 2. Fault + recovery latency (crashing plugin); skipped for none */
@@ -65,10 +67,14 @@ int main(int argc, char **argv) {
             total += now_ns() - a;
         }
         printf("%s,fault_recovery_us,%.2f\n", mode, total / trials / 1000.0);
+        iso_reset();
         dlclose(h);
     }
 
-    if (strcmp(host_state, HOST_STATE_OK) != 0) { fprintf(stderr, "host corrupted\n"); return 3; }
-    fprintf(stderr, "checksum=%ld\n", sum);   /* stops the compiler discarding the loop */
+    if (strcmp(host_state, HOST_STATE_OK) != 0 || strcmp(host_config, HOST_CONFIG_OK) != 0) {
+        fprintf(stderr, "host corrupted\n");
+        return 3;
+    }
+    fprintf(stderr, "checksum=%ld\n", sum);   /* keeps the compiler from discarding the loop */
     return 0;
 }

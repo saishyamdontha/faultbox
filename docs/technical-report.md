@@ -58,7 +58,7 @@ included to test where the MPK boundary fails, not to claim protection against h
 | `fork` | Child process per call, `seccomp` strict mode; result via pipe | Child exits abnormally; host continues |
 | `mpk` | `host_state` tagged with a key; access disabled while the plugin runs | SIGSEGV handler `siglongjmp`s to the host, restores PKRU, discards (`dlclose`) and reloads (`dlopen`) the plugin |
 | `mpk_fast` | As `mpk`, with `sigsetjmp(buf, 0)` and an `SA_NODEFER` handler | As `mpk` |
-| `mpk_safe` | As `mpk_fast`, plus a load-time scan rejecting files containing `0F 01 EF` (`WRPKRU`) | As `mpk`; flagged plugins are never loaded |
+| `mpk_scan` | As `mpk_fast`, plus a load-time scan rejecting files containing `0F 01 EF` (`WRPKRU`) | As `mpk`; flagged plugins are never loaded |
 
 Three implementation details turned out to matter:
 
@@ -92,7 +92,7 @@ Three implementation details turned out to matter:
 | fork | ok | contained | ok (child's copy) | ok (child's copy) |
 | mpk | ok | contained, reloaded | contained, reloaded | **host corrupted** |
 | mpk_fast | ok | contained, reloaded | contained, reloaded | **host corrupted** |
-| mpk_safe | ok | contained, reloaded | contained, reloaded | rejected at load |
+| mpk_scan | ok | contained, reloaded | contained, reloaded | rejected at load |
 
 In the MPK modes, the two faults are caught for different reasons. The out-of-bounds write raises
 `SEGV_PKUERR`: **the protection key is what stops the corruption**. The null dereference raises
@@ -109,7 +109,7 @@ child's copy-on-write memory.
 | mpk | 313 ns | +310 ns | 30.9 µs |
 | fork | 109,070 ns | +109 µs | 110 µs |
 
-`mpk_safe` has the same call path as `mpk_fast`; its scan runs once at load time and was not
+`mpk_scan` has the same call path as `mpk_fast`; its scan runs once at load time and was not
 benchmarked separately.
 
 ## 6. Discussion

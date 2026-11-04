@@ -5,18 +5,19 @@
 enum { CALL_OK = 0, CALL_PLUGIN_FAULT = 1 };
 typedef int (*iso_call_fn)(plugin_fn run, int in, int *out);
 
-int run_none(plugin_fn run, int in, int *out);
-int run_fork(plugin_fn run, int in, int *out);
-int run_mpk(plugin_fn run, int in, int *out);
-int run_mpk_fast(plugin_fn run, int in, int *out);
-int iso_is_mpk(iso_call_fn call);
+int run_none(plugin_fn run, int in, int *out);      /* no isolation */
+int run_fork(plugin_fn run, int in, int *out);      /* new sandboxed process per call */
+int run_ipc(plugin_fn run, int in, int *out);       /* persistent sandboxed worker */
+int run_mpk(plugin_fn run, int in, int *out);       /* MPK domain, saves signal mask */
+int run_mpk_fast(plugin_fn run, int in, int *out);  /* MPK domain, no mask save */
 
 void mpk_setup(char *protected_page, long pagesz);
-iso_call_fn iso_by_name(const char *mode);
-int iso_last_fault_code(void);
-const char *iso_fault_name(int code);
+void iso_reset(void);                                /* stop the ipc worker, if any */
 
-long iso_scan_wrpkru(const char *path);
+iso_call_fn iso_by_name(const char *mode);
+int iso_is_mpk(iso_call_fn call);
 int iso_mode_scans(const char *mode);
+long iso_scan_wrpkru(const char *path);
+const char *iso_last_fault(void);
 
 #endif
