@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <dlfcn.h>
 #include <link.h>
+#include <sched.h>
 #include <unistd.h>
 #include "isolation.h"
 
@@ -110,7 +111,7 @@ static void ipc_stop(void) {
     ipc_req = ipc_resp = -1;
 }
 
-void iso_reset(void) { ipc_stop(); }
+void iso_reset(void) { ipc_stop(); iso_shm_stop(); }
 
 int run_ipc(plugin_fn run, int in, int *out) {
     if (ipc_pid <= 0) ipc_start(run);
@@ -218,6 +219,7 @@ iso_call_fn iso_by_name(const char *mode) {
     if (strcmp(mode, "none") == 0)     return run_none;
     if (strcmp(mode, "fork") == 0)     return run_fork;
     if (strcmp(mode, "ipc") == 0)      return run_ipc;
+    if (strcmp(mode, "ipc_shm") == 0)  return run_ipc_shm;
     if (strcmp(mode, "mpk") == 0)      return run_mpk;
     if (strcmp(mode, "mpk_fast") == 0) return run_mpk_fast;
     if (strcmp(mode, "mpk_hard") == 0) return run_mpk_fast;
@@ -381,4 +383,101 @@ int iso_snapshot_take(void *handle) {
 void iso_snapshot_restore(void) {
     for (int i = 0; i < snap_n; i++)
         memcpy(snap[i].addr, snap[i].copy, snap[i].len);
+}
+
+/* ---------- Mode: ipc_shm (persistent worker, shared memory, spinning) ----------
+   Fastest realistic process boundary: no syscalls per call. Host and worker
+   spin on a shared-memory channel on two different cores. The worker stays
+   under seccomp strict (spinning needs no syscalls). Cost: one core burned. */
+struct shm_chan { int req_seq; int in; int resp_seq; int out; };
+static struct shm_chan *shm = NULL;
+static pid_t shm_pid = -1;
+static volatile sig_atomic_t shm_child_died = 0;
+static int shm_cpus_known = 0, shm_have_two = 0, shm_host_cpu = -1, shm_worker_cpu = -1;
+
+static void shm_sigchld(int sig) { (void)sig; shm_child_died = 1; }
+
+static void pin_to(int cpu) {
+    cpu_set_t s;
+    CPU_ZERO(&s);
+    CPU_SET(cpu, &s);
+    sched_setaffinity(0, sizeof s, &s);
+}
+
+static void shm_pick_cpus(void) {
+    if (shm_cpus_known) return;
+    shm_cpus_known = 1;
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (sched_getaffinity(0, sizeof set, &set) != 0) return;
+    int found = 0;
+    for (int c = 0; c < CPU_SETSIZE && found < 2; c++) {
+        if (!CPU_ISSET(c, &set)) continue;
+        if (found == 0) shm_host_cpu = c; else shm_worker_cpu = c;
+        found++;
+    }
+    shm_have_two = (found == 2);
+    if (!shm_have_two)
+        fprintf(stderr, "ipc_shm: only one CPU available, spinning will be slow\n");
+}
+
+static void shm_start(plugin_fn run) {
+    if (!shm) {
+        shm = mmap(NULL, sizeof *shm, PROT_READ | PROT_WRITE,
+                   MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        if (shm == MAP_FAILED) { perror("mmap"); exit(2); }
+        struct sigaction sa = {0};
+        sa.sa_handler = shm_sigchld;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGCHLD, &sa, NULL);
+    }
+    shm_pick_cpus();
+    memset(shm, 0, sizeof *shm);
+    shm_child_died = 0;
+
+    pid_t pid = fork();
+    if (pid < 0) { perror("fork"); exit(2); }
+    if (pid == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGKILL);       /* never outlive the host */
+        if (shm_have_two) pin_to(shm_worker_cpu);
+        sandbox_child();
+        int last = 0;
+        for (;;) {
+            int seq;
+            while ((seq = __atomic_load_n(&shm->req_seq, __ATOMIC_ACQUIRE)) == last)
+                __builtin_ia32_pause();
+            last = seq;
+            shm->out = run(shm->in);
+            __atomic_store_n(&shm->resp_seq, seq, __ATOMIC_RELEASE);
+        }
+    }
+    if (shm_have_two) pin_to(shm_host_cpu);
+    shm_pid = pid;
+}
+
+void iso_shm_stop(void) {
+    if (shm_pid <= 0) return;
+    kill(shm_pid, SIGKILL);
+    waitpid(shm_pid, NULL, 0);
+    shm_pid = -1;
+}
+
+int run_ipc_shm(plugin_fn run, int in, int *out) {
+    if (shm_pid <= 0) shm_start(run);
+    int seq = shm->req_seq + 1;
+    shm->in = in;
+    __atomic_store_n(&shm->req_seq, seq, __ATOMIC_RELEASE);
+    while (__atomic_load_n(&shm->resp_seq, __ATOMIC_ACQUIRE) != seq) {
+        if (shm_child_died) {                    /* worker crashed: reap and respawn */
+            int status = 0;
+            waitpid(shm_pid, &status, 0);
+            if (WIFSIGNALED(status)) last_fault_sig = WTERMSIG(status);
+            shm_pid = -1;
+            shm_start(run);
+            return CALL_PLUGIN_FAULT;
+        }
+        __builtin_ia32_pause();
+    }
+    *out = shm->out;
+    return CALL_OK;
 }

@@ -29,6 +29,16 @@ ipc,abort_call,4,plugin_fault_contained
 ipc,stack_overflow,4,plugin_fault_contained
 ipc,exit_call,4,plugin_fault_contained
 ipc,wrpkru_attack,0,ok
+ipc_shm,good,0,ok
+ipc_shm,nullderef,4,plugin_fault_contained
+ipc_shm,oob_write,0,ok
+ipc_shm,corrupt_unprotected,0,ok
+ipc_shm,divzero,4,plugin_fault_contained
+ipc_shm,illegal,4,plugin_fault_contained
+ipc_shm,abort_call,4,plugin_fault_contained
+ipc_shm,stack_overflow,4,plugin_fault_contained
+ipc_shm,exit_call,4,plugin_fault_contained
+ipc_shm,wrpkru_attack,0,ok
 mpk,good,0,ok
 mpk,nullderef,4,plugin_fault_contained
 mpk,oob_write,4,plugin_fault_contained

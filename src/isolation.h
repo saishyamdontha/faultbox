@@ -28,4 +28,7 @@ int iso_snapshot_take(void *handle);
 void iso_snapshot_restore(void);
 void iso_snapshot_free(void);
 
+int run_ipc_shm(plugin_fn run, int in, int *out);
+void iso_shm_stop(void);
+
 #endif

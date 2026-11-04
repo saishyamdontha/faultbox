@@ -5,13 +5,15 @@ mkdir -p results
 out=results/bench.csv
 echo "rep,mode,metric,value" > "$out"
 for rep in 1 2 3 4 5; do
-  for m in none fork ipc mpk mpk_fast mpk_hard; do
+  for m in none fork ipc ipc_shm mpk mpk_fast mpk_hard; do
+    cpus=2
     case $m in
-      fork) calls=10000 ;;
-      ipc)  calls=100000 ;;
-      *)    calls=1000000 ;;
+      fork)    calls=10000 ;;
+      ipc)     calls=100000 ;;
+      ipc_shm) calls=1000000; cpus=2,4 ;;   # host and worker on separate cores
+      *)       calls=1000000 ;;
     esac
-    taskset -c 2 ./build/bench "$m" "$calls" 1000 2>/dev/null | sed "s/^/$rep,/" | tee -a "$out"
+    taskset -c "$cpus" ./build/bench "$m" "$calls" 1000 2>/dev/null | sed "s/^/$rep,/" | tee -a "$out"
   done
 done
 echo "--- mean over 5 reps ---"
