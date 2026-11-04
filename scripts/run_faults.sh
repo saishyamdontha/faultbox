@@ -2,7 +2,7 @@
 set -u
 cd "$(dirname "$0")/.."
 mkdir -p results
-modes="${*:-none fork mpk}"
+modes="${*:-none fork mpk mpk_fast}"
 out=results/faults.csv
 echo "mode,plugin,exit_code,outcome" > "$out"
 for m in $modes; do

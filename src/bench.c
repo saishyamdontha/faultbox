@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (host_state == MAP_FAILED) { perror("mmap"); return 2; }
     strcpy(host_state, HOST_STATE_OK);
-    if (call == run_mpk) mpk_setup(host_state, pagesz);
+    if (iso_is_mpk(call)) mpk_setup(host_state, pagesz);
 
     /* 1. Per-call overhead (well-behaved plugin) */
     plugin_fn run;
@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
             double a = now_ns();
             int rc = call(run, 0, &out);
             if (rc != CALL_PLUGIN_FAULT) { fprintf(stderr, "expected fault\n"); return 2; }
-            if (call == run_mpk) { dlclose(h); h = load("build/nullderef.so", &run); }
+            if (iso_is_mpk(call)) { dlclose(h); h = load("build/nullderef.so", &run); }
             total += now_ns() - a;
         }
         printf("%s,fault_recovery_us,%.2f\n", mode, total / trials / 1000.0);

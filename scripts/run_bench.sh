@@ -5,7 +5,7 @@ mkdir -p results
 out=results/bench.csv
 echo "rep,mode,metric,value" > "$out"
 for rep in 1 2 3 4 5; do
-  for m in none fork mpk; do
+  for m in none fork mpk mpk_fast; do
     if [ "$m" = fork ]; then calls=10000; else calls=1000000; fi
     taskset -c 2 ./build/bench "$m" "$calls" 1000 2>/dev/null | sed "s/^/$rep,/" | tee -a "$out"
   done

@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (host_state == MAP_FAILED) { perror("mmap"); return 2; }
     strcpy(host_state, HOST_STATE_OK);
-    if (call == run_mpk) mpk_setup(host_state, pagesz);
+    if (iso_is_mpk(call)) mpk_setup(host_state, pagesz);
 
     void *h = dlopen(path, RTLD_NOW);
     if (!h) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 2; }
@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     int rc = call(run, 21, &out);
 
     int recovered = 0;
-    if (rc != CALL_OK && call == run_mpk) {
+    if (rc != CALL_OK && iso_is_mpk(call)) {
         dlclose(h);                         /* discard faulted plugin */
         h = dlopen(path, RTLD_NOW);         /* load a fresh instance */
         recovered = (h != NULL);

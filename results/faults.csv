@@ -8,3 +8,6 @@ fork,oob_write,0,ok
 mpk,good,0,ok
 mpk,nullderef,4,plugin_fault_contained
 mpk,oob_write,4,plugin_fault_contained
+mpk_fast,good,0,ok
+mpk_fast,nullderef,4,plugin_fault_contained
+mpk_fast,oob_write,4,plugin_fault_contained

@@ -8,6 +8,8 @@ typedef int (*iso_call_fn)(plugin_fn run, int in, int *out);
 int run_none(plugin_fn run, int in, int *out);
 int run_fork(plugin_fn run, int in, int *out);
 int run_mpk(plugin_fn run, int in, int *out);
+int run_mpk_fast(plugin_fn run, int in, int *out);
+int iso_is_mpk(iso_call_fn call);
 
 void mpk_setup(char *protected_page, long pagesz);
 iso_call_fn iso_by_name(const char *mode);

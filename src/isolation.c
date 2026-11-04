@@ -74,7 +74,7 @@ void mpk_setup(char *protected_page, long pagesz) {
     }
     struct sigaction sa = {0};
     sa.sa_sigaction = mpk_segv_handler;
-    sa.sa_flags = SA_SIGINFO;
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
     sigaction(SIGSEGV, &sa, NULL);
 }
 
@@ -97,6 +97,7 @@ iso_call_fn iso_by_name(const char *mode) {
     if (strcmp(mode, "none") == 0) return run_none;
     if (strcmp(mode, "fork") == 0) return run_fork;
     if (strcmp(mode, "mpk") == 0)  return run_mpk;
+    if (strcmp(mode, "mpk_fast") == 0) return run_mpk_fast;
     return NULL;
 }
 
@@ -109,4 +110,26 @@ const char *iso_fault_name(int code) {
         case SEGV_PKUERR: return "SEGV_PKUERR";
         default:          return "-";
     }
+}
+
+/* ---------- Mode 4: MPK without saving the signal mask ----------
+   sigsetjmp(..., 0) skips the rt_sigprocmask syscall. Safe only because
+   the handler uses SA_NODEFER, so SIGSEGV is not left blocked after
+   siglongjmp. Isolates the cost of the domain switch itself. */
+int run_mpk_fast(plugin_fn run, int in, int *out) {
+    if (sigsetjmp(mpk_jmp, 0) != 0) {
+        pkey_set(host_pkey, 0);
+        return CALL_PLUGIN_FAULT;
+    }
+    in_plugin = 1;
+    pkey_set(host_pkey, PKEY_DISABLE_ACCESS);
+    int r = run(in);
+    pkey_set(host_pkey, 0);
+    in_plugin = 0;
+    *out = r;
+    return CALL_OK;
+}
+
+int iso_is_mpk(iso_call_fn call) {
+    return call == run_mpk || call == run_mpk_fast;
 }
