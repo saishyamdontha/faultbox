@@ -2,6 +2,8 @@
 
 **In-process fault isolation for untrusted C plugins, using x86 memory protection keys (MPK/PKU).**
 
+**Technical report:** [PDF](docs/faultbox-technical-report.pdf) ([Markdown source](docs/technical-report.md))
+
 faultbox is a small C plugin host that runs untrusted plugins (`.so` files) under four isolation
 strategies and measures two things for each one: whether the host survives a faulty plugin,
 and what the isolation costs per call.
